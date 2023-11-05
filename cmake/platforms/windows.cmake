@@ -7,6 +7,22 @@ set(platform_libs)
 
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 
+# Some Windows resource compilers such as windres from the MinGW
+# toolchain cause errors if they were given a resource file with no
+# resources. The test below checks if the resource compiler used by
+# CMake causes errors when it tries to compile an empty resource file,
+# and defines MINGW32_FIX if there are errors. This test will always be
+# run when compiling for Windows, even if ICON_FILE is defined.
+
+message(STATUS "Compiling empty resource file")
+try_compile(resource_build_success ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR}/emptyrc.rc)
+if(NOT resource_build_success)
+  message(STATUS "Compiling empty resource file - failed")
+  add_compile_definitions(MINGW32_FIX)
+else()
+  message(STATUS "Compiling empty resource file - succeeded")
+endif()
+
 if(CMAKE_C_COMPILER_ID MATCHES "MSVC")
   # Turn off some warnings that I've just found too noisy.
   #
