@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 
 project(puzzles
-  LANGUAGES C)
+  LANGUAGES C CXX)
 
 include(cmake/setup.cmake)
 

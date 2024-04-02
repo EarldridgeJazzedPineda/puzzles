@@ -240,6 +240,15 @@ typedef struct key_label {
  * Platform routines
  */
 
+/* 
+ * extern "C" is required for the Haiku front end (and other front ends
+ * that require the use of C++.
+ */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* We can't use #ifdef DEBUG, because Cygwin defines it by default. */
 #ifdef DEBUGGING
 #define debug(x) (debug_printf x)
@@ -253,6 +262,10 @@ void frontend_default_colour(frontend *fe, float *output);
 void deactivate_timer(frontend *fe);
 void activate_timer(frontend *fe);
 void get_random_seed(void **randseed, int *randseedsize);
+
+#ifdef __cplusplus
+}
+#endif
 
 /*
  * drawing.c
@@ -308,6 +321,11 @@ void print_line_dotted(drawing *dr, bool dotted);
 /*
  * midend.c
  */
+ 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 midend *midend_new(frontend *fe, const game *ourgame,
 		   const drawing_api *drapi, void *drhandle);
 void midend_free(midend *me);
@@ -363,6 +381,10 @@ const char *identify_game(char **name,
                           void *rctx);
 void midend_request_id_changes(midend *me, void (*notify)(void *), void *ctx);
 bool midend_get_cursor_location(midend *me, int *x, int *y, int *w, int *h);
+
+#ifdef __cplusplus
+}
+#endif
 
 /* Printing functions supplied by the mid-end */
 const char *midend_print_puzzle(midend *me, document *doc, bool with_soln);

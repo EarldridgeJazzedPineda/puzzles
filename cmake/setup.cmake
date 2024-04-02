@@ -30,6 +30,8 @@ elseif(CMAKE_SYSTEM_NAME MATCHES "Darwin")
   include(cmake/platforms/osx.cmake)
 elseif(CMAKE_SYSTEM_NAME MATCHES "NestedVM")
   include(cmake/platforms/nestedvm.cmake)
+elseif(CMAKE_SYSTEM_NAME MATCHES "Haiku")
+  include(cmake/platforms/haiku.cmake)
 elseif(CMAKE_C_COMPILER MATCHES "emcc")
   include(cmake/platforms/emscripten.cmake)
 else() # assume Unix
