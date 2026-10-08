@@ -1357,7 +1357,7 @@ static int new_clues(const game_params *params, random_state *rs,
             corners = straights + nstraightpos;
             ncornerpos = 0;
             for (i = 0; i < w*h; i++)
-                if (clues[i] == STRAIGHT)
+                if (clues[i] == CORNER)
                     corners[ncornerpos++] = i;
             nstraights = nstraightpos;
             ncorners = ncornerpos;
@@ -1367,6 +1367,7 @@ static int new_clues(const game_params *params, random_state *rs,
             while (nstraightpos > 0 || ncornerpos > 0) {
                 int cluepos;
                 int clue;
+                bool corner;
 
                 /*
                  * Decide which clue to try to remove next. If both
@@ -1375,15 +1376,21 @@ static int new_clues(const game_params *params, random_state *rs,
                  * whatever we can get.
                  */
                 if (nstraightpos > 0 && ncornerpos > 0) {
-                    if (nstraights >= ncorners)
+                    if (nstraights >= ncorners) {
                         cluepos = straights[--nstraightpos];
-                    else
-                        cluepos = straights[--ncornerpos];
+                        corner = false;
+                    } else {
+                        cluepos = corners[--ncornerpos];
+                        corner = true;
+                    }
                 } else {
-                    if (nstraightpos > 0)
+                    if (nstraightpos > 0) {
                         cluepos = straights[--nstraightpos];
-                    else
-                        cluepos = straights[--ncornerpos];
+                        corner = false;
+                    } else {
+                        cluepos = corners[--ncornerpos];
+                        corner = true;
+                    }
                 }
 
                 y = cluepos / w;
@@ -1391,11 +1398,14 @@ static int new_clues(const game_params *params, random_state *rs,
 
                 clue = clues[y*w+x];
                 clues[y*w+x] = 0;	       /* try removing this clue */
+                if (corner) ncorners--; else nstraights--;
 
                 ret = pearl_solve(w, h, clues, grid_out, diff, false);
                 assert(ret > 0);
-                if (ret != 1)
+                if (ret != 1) {
                     clues[y*w+x] = clue;   /* oops, put it back again */
+                    if (corner) ncorners++; else nstraights++;
+		}
             }
             sfree(cluespace);
         }
