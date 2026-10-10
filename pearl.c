@@ -139,6 +139,7 @@ struct shared_state {
 
 #define INGRID(state, gx, gy) ((gx) >= 0 && (gx) < (state)->shared->w && \
                                (gy) >= 0 && (gy) < (state)->shared->h)
+#define INGRID2(w, h, gx, gy) ((gx) >= 0 && (gx) < (w) && (gy) >= 0 && (gy) < (h))
 struct game_state {
     struct shared_state *shared;
     char *lines;        /* size w*h: lines placed */
@@ -308,7 +309,8 @@ static int pearl_solve(int w, int h, char *clues, char *result,
     short *workspace;
     DSF *dsf;
     int *dsfsize;
-    int x, y, b, d;
+    int x, y, b, d, square;
+    tdq *squares_todo = tdq_new(w*h);
     int ret = -1;
 
     /*
@@ -364,6 +366,13 @@ static int pearl_solve(int w, int h, char *clues, char *result,
     dsfsize = snewn(w*h, int);
 
     /*
+     * We use a to-do queue to check only the squares that need to be
+     * modified, instead of always going through every square on the
+     * board.
+     */
+    tdq_fill(squares_todo);
+
+    /*
      * Now repeatedly try to find something we can do.
      */
     while (1) {
@@ -384,8 +393,9 @@ static int pearl_solve(int w, int h, char *clues, char *result,
 	 * square state which is inconsistent with known facts
 	 * about the edges around the square.
 	 */
-	for (y = 0; y < h; y++)
-	    for (x = 0; x < w; x++) {
+	while ((square = tdq_remove(squares_todo)) != -1) {
+		x = square % w;
+		y = square / w;
 		for (b = 0; b < 0xD; b++)
 		    if (workspace[(2*y+1)*W+(2*x+1)] & (1<<b)) {
 			/*
@@ -424,7 +434,7 @@ static int pearl_solve(int w, int h, char *clues, char *result,
 		    ret = 0;
 		    goto cleanup;
 		}
-	    }
+	}
 
 	/*
 	 * Now go through the states array again, and nail down any
@@ -463,6 +473,8 @@ static int pearl_solve(int w, int h, char *clues, char *result,
 
 		    if (!(edgeor & d) && workspace[ey*W+ex] == 3) {
 			workspace[ey*W+ex] = 2;
+			if (INGRID2(w, h, x+DX(d), y+DY(d)))
+			    tdq_add(squares_todo, (y+DY(d))*w+x+DX(d));
 			done_something = true;
 #ifdef SOLVER_DIAGNOSTICS
                         if (solver_show_working)
@@ -472,6 +484,8 @@ static int pearl_solve(int w, int h, char *clues, char *result,
 #endif
 		    } else if ((edgeand & d) && workspace[ey*W+ex] == 3) {
 			workspace[ey*W+ex] = 1;
+			if (INGRID2(w, h, x+DX(d), y+DY(d)))
+			    tdq_add(squares_todo, (y+DY(d))*w+x+DX(d));
 			done_something = true;
 #ifdef SOLVER_DIAGNOSTICS
                         if (solver_show_working)
@@ -530,6 +544,9 @@ static int pearl_solve(int w, int h, char *clues, char *result,
 			     */
 			    if (!(workspace[fy*W+fx] & (1<<type))) {
 				workspace[ey*W+ex] = 2;
+				tdq_add(squares_todo, y*w+x);
+				if (INGRID2(w, h, x+DX(d), y+DY(d)))
+				    tdq_add(squares_todo, (y+DY(d))*w+x+DX(d));
 				done_something = true;
 #ifdef SOLVER_DIAGNOSTICS
                                 if (solver_show_working)
@@ -780,6 +797,8 @@ static int pearl_solve(int w, int h, char *clues, char *result,
 				     * Yes! Mark this edge disconnected.
 				     */
 				    workspace[y*W+x] = 2;
+				    tdq_add(squares_todo, ac);
+				    tdq_add(squares_todo, bc);
 				    done_something = true;
 #ifdef SOLVER_DIAGNOSTICS
                                     if (solver_show_working)
@@ -925,6 +944,7 @@ cleanup:
 
     sfree(dsfsize);
     dsf_free(dsf);
+    tdq_free(squares_todo);
     sfree(workspace);
     assert(ret >= 0);
     return ret;
