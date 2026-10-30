@@ -79,7 +79,7 @@ static int black_sort_cmpfn(void *v1, void *v2)
 /* 'board' is an array of enum face_colour, indicating which faces are
  * currently black/white/grey.  'colour' is FACE_WHITE or FACE_BLACK.
  * Returns whether it's legal to colour the given face with this colour. */
-static bool can_colour_face(grid *g, char* board, int face_index,
+bool can_colour_face(grid *g, char* board, int face_index,
                             enum face_colour colour)
 {
     int i, j;

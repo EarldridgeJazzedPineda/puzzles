@@ -45,6 +45,7 @@
 #include "puzzles.h"
 #include "grid.h"
 #include "loopgen.h"
+bool can_colour_face(grid *g, char *board, int face_index, enum face_colour colour);
 
 #ifdef STANDALONE_SOLVER
 #define SOLVER_DIAGNOSTICS
@@ -97,6 +98,16 @@ static bool solver_show_working = false;
 #define bRD (1 << RD)
 #define bDR (1 << DR)
 #define bBLANK (1 << BLANK)
+
+/* Precomputed bitmasks for filtering and checking states. */
+#define MASKR1 0x0228
+#define MASKR2 0x1441
+#define MASKU1 0x0448
+#define MASKU2 0x1221
+#define MASKL1 0x1060
+#define MASKL2 0x0609
+#define MASKD1 0x1600
+#define MASKD2 0x0069
 
 enum {
     COL_BACKGROUND, COL_HIGHLIGHT, COL_LOWLIGHT,
@@ -386,31 +397,38 @@ static int pearl_solve(int w, int h, char *clues, char *result,
 	 */
 	for (y = 0; y < h; y++)
 	    for (x = 0; x < w; x++) {
-		for (b = 0; b < 0xD; b++)
-		    if (workspace[(2*y+1)*W+(2*x+1)] & (1<<b)) {
-			/*
-			 * If any edge of this square is known to
-			 * be connected when state b would require
-			 * it disconnected, or vice versa, discard
-			 * the state.
-			 */
-			for (d = 1; d <= 8; d += d) {
-			    int ex = 2*x+1 + DX(d), ey = 2*y+1 + DY(d);
-			    if (workspace[ey*W+ex] ==
-				((b & d) ? 2 : 1)) {
-				workspace[(2*y+1)*W+(2*x+1)] &= ~(1<<b);
+		const short er = workspace[(2*y+1)*W+2*x+2];
+		const short eu = workspace[(2*y)*W+2*x+1];
+		const short el = workspace[(2*y+1)*W+2*x];
+		const short ed = workspace[(2*y+2)*W+2*x+1];
+
+		/*
+		 * If any edge of this square is known to
+		 * be connected when the state would require
+		 * it disconnected, or vice versa, discard
+		 * the state.
+		 */
+		const short originalstates = workspace[(2*y+1)*W+(2*x+1)];
+		short states = originalstates;
+		if      (er == 1) states &= MASKR1;
+		else if (er == 2) states &= MASKR2;
+		if      (eu == 1) states &= MASKU1;
+		else if (eu == 2) states &= MASKU2;
+		if      (el == 1) states &= MASKL1;
+		else if (el == 2) states &= MASKL2;
+		if      (ed == 1) states &= MASKD1;
+		else if (ed == 2) states &= MASKD2;
+
+		if (states != originalstates) {
+		    workspace[(2*y+1)*W+(2*x+1)] = states;
 #ifdef SOLVER_DIAGNOSTICS
-                                if (solver_show_working)
-                                    printf("edge (%d,%d)-(%d,%d) rules out "
-                                           "state %d for square (%d,%d)\n",
-                                           ex/2, ey/2, (ex+1)/2, (ey+1)/2,
-                                           b, x, y);
+                    if (solver_show_working)
+                        printf("one or more invalid states "
+                               "removed from square (%d,%d)\n",
+                               x, y);
 #endif
-				done_something = true;
-				break;
-			    }
-			}
-		    }
+		    done_something = true;
+		}
 
 		/*
 		 * Consistency check: each square must have at
@@ -435,11 +453,15 @@ static int pearl_solve(int w, int h, char *clues, char *result,
 	    for (x = 0; x < w; x++) {
 		int edgeor = 0, edgeand = 15;
 
-		for (b = 0; b < 0xD; b++)
-		    if (workspace[(2*y+1)*W+(2*x+1)] & (1<<b)) {
-			edgeor |= b;
-			edgeand &= b;
-		    }
+		const short states = workspace[(2*y+1)*W+(2*x+1)];
+		if (states & MASKR1) edgeor |= 1;
+		if (states & MASKU1) edgeor |= 2;
+		if (states & MASKL1) edgeor |= 4;
+		if (states & MASKD1) edgeor |= 8;
+		if (states & MASKR2) edgeand &= 14;
+		if (states & MASKU2) edgeand &= 13;
+		if (states & MASKL2) edgeand &= 11;
+		if (states & MASKD2) edgeand &= 7;
 
 		/*
 		 * Now any bit clear in edgeor marks a disconnected
@@ -997,7 +1019,7 @@ static int pearl_loopgen_bias(void *vctx, char *board, int face)
     struct pearl_loopgen_bias_ctx *ctx = (struct pearl_loopgen_bias_ctx *)vctx;
     grid *g = ctx->g;
     int oldface, newface;
-    int i, j, k;
+    int i, j, k, score = ctx->score;
 
     tdq_add(ctx->faces_todo, face);
     while ((j = tdq_remove(ctx->faces_todo)) >= 0) {
@@ -1107,25 +1129,27 @@ static int pearl_loopgen_bias(void *vctx, char *board, int face)
          * Adjust the running total of black clues we've counted.
          */
         while ((j = tdq_remove(b->blackclues_todo)) >= 0) {
-            ctx->score -= b->blackclues[j];
-            b->blackclues[j] = ((b->vertextypes[j] & 0x10) &&
+            score -= b->blackclues[j];
+            bool blackclue = ((b->vertextypes[j] & 0x10) &&
                                 !((b->vertextypes[b->neighbour[0][j]] |
                                    b->vertextypes[b->neighbour[1][j]])
                                   & 0x10));
-            ctx->score += b->blackclues[j];
+            score += blackclue;
+	    b->blackclues[j] = blackclue;
         }
     }
 
-    return ctx->score;
+    ctx->score = score;
+    return score;
 }
 
-static void pearl_loopgen(int w, int h, char *lines, random_state *rs, grid *g)
+static void pearl_loopgen(int w, int h, char *lines, random_state *rs, grid *g, char *board)
 {
-    char *board = snewn(g->num_faces, char);
     int i, s = g->tilesize;
     struct pearl_loopgen_bias_ctx biasctx;
 
     memset(lines, 0, w*h);
+    if (!rs) goto draw; /* need to recompute lines */
 
     /*
      * Initialise the context for the bias function. Initially we fill
@@ -1171,6 +1195,7 @@ static void pearl_loopgen(int w, int h, char *lines, random_state *rs, grid *g)
         tdq_free(biasctx.boundaries[i].blackclues_todo);
     }
 
+draw:
     for (i = 0; i < g->num_edges; i++) {
         grid_edge *e = g->edges[i];
         enum face_colour c1 = FACE_COLOUR(e->face1);
@@ -1200,8 +1225,6 @@ static void pearl_loopgen(int w, int h, char *lines, random_state *rs, grid *g)
         }
     }
 
-    sfree(board);
-
 #if defined LOOPGEN_DIAGNOSTICS && !defined GENERATION_DIAGNOSTICS
     printf("as returned:\n");
     for (y = 0; y < h; y++) {
@@ -1225,8 +1248,9 @@ static int new_clues(const game_params *params, random_state *rs,
                      char *clues, char *grid_out)
 {
     int w = params->w, h = params->h, diff = params->difficulty;
-    int ngen = 0, x, y, d, ret, i;
+    int ngen = 0, x, y, d, ret, i, f = 0, n, best, stale, flips;
     grid *g = grid_new(GRID_SQUARE, w-1, h-1, NULL);
+    char *board = snewn(g->num_faces, char);
 
     /*
      * Difficulty exception: 5x5 Tricky is not generable (the
@@ -1237,7 +1261,9 @@ static int new_clues(const game_params *params, random_state *rs,
 
     while (1) {
         ngen++;
-	pearl_loopgen(w, h, grid_out, rs, g);
+	pearl_loopgen(w, h, grid_out, rs, g, board);
+	best = w*h, stale = flips = 0;
+      climb:
 
 #ifdef GENERATION_DIAGNOSTICS
 	printf("grid array:\n");
@@ -1316,10 +1342,24 @@ static int new_clues(const game_params *params, random_state *rs,
             /*
              * See if we can solve the puzzle just like this.
              */
-            ret = pearl_solve(w, h, clues, grid_out, diff, false);
+            memset(grid_out, -1, w*h);   /* -1 = left undecided */
+            ret = pearl_solve(w, h, clues, grid_out, diff, true);
             assert(ret > 0);	       /* shouldn't be inconsistent! */
-            if (ret != 1)
-                continue;		       /* go round and try again */
+            if (ret != 1) {
+                /* mutate and keep improvements; stop after 40 tries */
+                for (n = i = 0; i < w*h; i++) n += (signed char)grid_out[i] < 0;
+                if (n > best) board[f] ^= FACE_BLACK, stale++;   /* undo: white 0 <-> black 2 */
+                else stale = n < best ? 0 : stale+1, best = n;
+                for (i = 0; stale < 40 && flips < 2*g->num_faces && i < 100; i++) {
+                    f = random_upto(rs, g->num_faces);
+                    if (can_colour_face(g, board, f, FACE_BLACK - board[f])) {
+                        board[f] ^= FACE_BLACK, flips++;
+                        pearl_loopgen(w, h, grid_out, NULL, g, board);
+                        goto climb;
+                    }
+                }
+                continue;
+            }
 
             /*
              * Check this puzzle isn't too easy.
@@ -1424,6 +1464,7 @@ static int new_clues(const game_params *params, random_state *rs,
 	break;			       /* got it */
     }
     grid_free(g);
+    sfree(board);
 
     debug(("%d %dx%d loops before finished puzzle.\n", ngen, w, h));
 
